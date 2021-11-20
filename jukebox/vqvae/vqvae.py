@@ -226,3 +226,34 @@ class VQVAE(nn.Module):
             metrics[key] = val.detach()
 
         return x_out, loss, metrics
+    
+    def forward_no_loss(self, x, hps):
+
+        N = x.shape[0]
+
+        # Encode/Decode
+        x_in = self.preprocess(x)
+        xs = []
+        for level in range(self.levels):
+            encoder = self.encoders[level]
+            x_out = encoder(x_in)
+            xs.append(x_out[-1])
+
+        zs, xs_quantised, commit_losses, quantiser_metrics = self.bottleneck(xs)
+        x_outs = []
+        for level in range(self.levels):
+            decoder = self.decoders[level]
+            x_out = decoder(xs_quantised[level:level+1], all_levels=False)
+            assert_shape(x_out, x_in.shape)
+            x_outs.append(x_out)
+
+        recons_loss = t.zeros(()).to(x.device)
+        spec_loss = t.zeros(()).to(x.device)
+        multispec_loss = t.zeros(()).to(x.device)
+        x_target = audio_postprocess(x.float(), hps)
+
+        for level in reversed(range(self.levels)):
+            x_out = self.postprocess(x_outs[level])
+            x_out = audio_postprocess(x_out, hps)
+
+        return x_out, x_outs, xs
